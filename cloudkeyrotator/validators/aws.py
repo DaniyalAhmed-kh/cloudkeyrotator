@@ -3,6 +3,7 @@ AWS credential validator.
 Validates access key pairs via STS and enumerates attached IAM permissions.
 """
 import re
+import logging
 from typing import Any, Dict, List
 
 from .base import BaseValidator
@@ -14,6 +15,9 @@ try:
 except ImportError:
     BOTO3_AVAILABLE = False
 
+
+logging.basicConfig(level=logging.WARNING)
+logger = logging.getLogger("cloudkeyrotator")
 
 # Services we probe to assess blast radius
 BLAST_RADIUS_PROBES = [
@@ -36,8 +40,10 @@ BLAST_RADIUS_PROBES = [
 
 
 class AWSValidator(BaseValidator):
-
     def validate(self) -> Dict[str, Any]:
+        """
+        Validate AWS access key and secret key, returning a result dictionary.
+        """
         result: Dict[str, Any] = {
             "provider":    "AWS",
             "cred_type":   "access_key",
@@ -83,16 +89,20 @@ class AWSValidator(BaseValidator):
                 "is_root":    ":root" in identity.get("Arn", ""),
             }
             result["_session"] = session    # carry session for enumeration
-
         except ClientError as e:
             code = e.response["Error"]["Code"]
+            logger.warning(f"AWS ClientError: {code} - {e.response['Error']['Message']}")
             result["error"] = f"AWS Error [{code}]: {e.response['Error']['Message']}"
         except Exception as e:
+            logger.error(f"AWS Exception: {e}")
             result["error"] = str(e)
 
         return result
 
     def enumerate(self, result: Dict[str, Any]) -> None:
+        """
+        Enrich result with permissions and blast radius assessment for AWS credentials.
+        """
         session = result.pop("_session", None)
         if not session or not result.get("valid"):
             result.setdefault("permissions", [])
@@ -133,8 +143,10 @@ class AWSValidator(BaseValidator):
                             critical.append(action)
                     else:
                         denied.append(action)
-        except ClientError:
-            pass  # No iam:SimulatePrincipalPolicy permission — fall back to probes
+        except ClientError as e:
+            logger.warning(f"AWS IAM ClientError: {e}")
+        except Exception as e:
+            logger.error(f"AWS IAM Exception: {e}")
 
         # ── Service Blast-Radius Probes ───────────────────────────────────────
         accessible_services: List[str] = []

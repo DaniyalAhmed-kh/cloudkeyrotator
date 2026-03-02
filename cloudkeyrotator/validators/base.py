@@ -4,9 +4,9 @@ from typing import Any, Dict
 
 
 class BaseValidator(ABC):
-    def __init__(self, credential: str, meta: Dict[str, Any]):
-        self.credential = credential
-        self.meta       = meta
+    def __init__(self, credential: str, meta: Dict[str, Any]) -> None:
+        self.credential: str = credential
+        self.meta: Dict[str, Any] = meta
 
     @abstractmethod
     def validate(self) -> Dict[str, Any]:

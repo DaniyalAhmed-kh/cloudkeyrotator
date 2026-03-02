@@ -5,6 +5,7 @@ Validates SA JSON keys via the Google IAM API.
 import json
 import time
 from typing import Any, Dict, List
+import logging
 
 import requests
 
@@ -41,10 +42,14 @@ BLAST_PROBES = [
     ("https://run.googleapis.com/v2/projects/{project}/locations",             "Cloud Run access"),
 ]
 
+logger = logging.getLogger("cloudkeyrotator")
+
 
 class GCPValidator(BaseValidator):
-
     def validate(self) -> Dict[str, Any]:
+        """
+        Validate GCP service account key and return result dictionary.
+        """
         result: Dict[str, Any] = {
             "provider":    "GCP",
             "cred_type":   "service_account_key",
@@ -90,12 +95,15 @@ class GCPValidator(BaseValidator):
             result["_project"]     = raw_json.get("project_id")
 
         except Exception as e:
+            logger.error(f"GCP token refresh failed: {e}")
             result["error"] = f"Token refresh failed — key may be revoked: {e}"
 
         return result
 
-    def _validate_raw_jwt(self, result, raw_json):
-        """Validate without google-auth by constructing a JWT manually."""
+    def _validate_raw_jwt(self, result: Dict[str, Any], raw_json: dict) -> Dict[str, Any]:
+        """
+        Validate GCP service account key without google-auth by constructing a JWT manually.
+        """
         try:
             import base64, hashlib, hmac
             from cryptography.hazmat.primitives import serialization, hashes
@@ -147,17 +155,23 @@ class GCPValidator(BaseValidator):
                 result["_access_token"] = resp.json().get("access_token")
                 result["_project"]      = raw_json.get("project_id")
             else:
+                logger.warning(f"GCP JWT token request failed: {resp.status_code} {resp.text[:200]}")
                 result["error"] = f"Token request failed [{resp.status_code}]: {resp.text[:200]}"
 
         except ImportError:
+            logger.error("Neither google-auth nor cryptography is installed.")
             result["error"] = ("Neither google-auth nor cryptography is installed. "
                                "Run: pip install google-auth cryptography")
         except Exception as e:
+            logger.error(f"GCP JWT validation error: {e}")
             result["error"] = str(e)
 
         return result
 
     def enumerate(self, result: Dict[str, Any]) -> None:
+        """
+        Enrich result with permissions and blast radius assessment for GCP credentials.
+        """
         if not result.get("valid"):
             result.setdefault("permissions", [])
             result.setdefault("blast_radius", {})
@@ -187,8 +201,8 @@ class GCPValidator(BaseValidator):
                     accessible.append(label)
                 elif r.status_code == 403:
                     pass  # Denied
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"GCP blast probe error: {e}")
 
         # ── IAM Roles for this SA ─────────────────────────────────────────────
         sa_email = result["identity"].get("service_account", "")

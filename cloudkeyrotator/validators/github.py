@@ -4,6 +4,7 @@ Validates tokens via the GitHub REST API and enumerates repo/org scopes.
 """
 import re
 from typing import Any, Dict, List
+import logging
 
 import requests
 
@@ -41,10 +42,14 @@ SCOPE_RISK = {
 
 CRITICAL_SCOPES = {"admin:org", "admin:enterprise", "workflow", "repo"}
 
+logger = logging.getLogger("cloudkeyrotator")
+
 
 class GitHubValidator(BaseValidator):
-
     def validate(self) -> Dict[str, Any]:
+        """
+        Validate GitHub personal access token and return result dictionary.
+        """
         token = self.credential.strip()
         if self.meta.get("matched_value"):
             token = self.meta["matched_value"]
@@ -72,6 +77,7 @@ class GitHubValidator(BaseValidator):
         try:
             resp = requests.get(f"{GITHUB_API}/user", headers=headers, timeout=10)
         except requests.RequestException as e:
+            logger.warning(f"GitHub network error: {e}")
             result["error"] = f"Network error: {e}"
             return result
 
@@ -82,6 +88,7 @@ class GitHubValidator(BaseValidator):
             result["error"] = "Token is valid but access forbidden (HTTP 403)"
             return result
         if resp.status_code != 200:
+            logger.warning(f"GitHub unexpected status: {resp.status_code}")
             result["error"] = f"Unexpected HTTP {resp.status_code}"
             return result
 
@@ -110,6 +117,9 @@ class GitHubValidator(BaseValidator):
         return result
 
     def enumerate(self, result: Dict[str, Any]) -> None:
+        """
+        Enrich result with permissions and blast radius assessment for GitHub tokens.
+        """
         if not result.get("valid"):
             result.setdefault("permissions", [])
             result.setdefault("blast_radius", {})
@@ -139,8 +149,8 @@ class GitHubValidator(BaseValidator):
             resp = requests.get(f"{GITHUB_API}/user/orgs", headers=headers, timeout=10)
             if resp.ok:
                 orgs = [o["login"] for o in resp.json()]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"GitHub orgs probe error: {e}")
 
         # ── Private Repos accessible ──────────────────────────────────────────
         private_repos = 0
@@ -153,8 +163,8 @@ class GitHubValidator(BaseValidator):
             )
             if resp.ok:
                 private_repos = len(resp.json())
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"GitHub repos probe error: {e}")
 
         # ── Check for admin on any org ────────────────────────────────────────
         org_admin: List[str] = []
@@ -173,8 +183,8 @@ class GitHubValidator(BaseValidator):
                         if "CRITICAL" not in [s["risk"] for s in scope_details]:
                             critical_scopes.append(f"org_admin:{org}")
                             highest = "CRITICAL"
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"GitHub org admin probe error: {e}")
 
         result["permissions"] = {
             "scopes":       scopes,

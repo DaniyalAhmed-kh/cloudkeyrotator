@@ -5,6 +5,7 @@ Used as fallback when provider cannot be detected.
 from typing import Any, Dict
 
 import requests
+import logging
 
 from .base import BaseValidator
 
@@ -21,10 +22,14 @@ GENERIC_PROBES = [
     ("https://api.npmjs.org/-/whoami",                   {"Authorization": "Bearer {tok}"},   "NPM"),
 ]
 
+logger = logging.getLogger("cloudkeyrotator")
+
 
 class GenericValidator(BaseValidator):
-
     def validate(self) -> Dict[str, Any]:
+        """
+        Validate generic token by probing common API endpoints.
+        """
         result: Dict[str, Any] = {
             "provider":    "Unknown",
             "cred_type":   "generic_token",
@@ -49,8 +54,8 @@ class GenericValidator(BaseValidator):
                     matches.append({"provider": provider_name, "url": url, "response": r.json()})
                 elif r.status_code not in (401, 403):
                     pass  # Ignore connection-level errors
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Generic probe error for {provider_name}: {e}")
 
         if matches:
             result["valid"]    = True
@@ -72,5 +77,7 @@ class GenericValidator(BaseValidator):
         return result
 
     def enumerate(self, result: Dict[str, Any]) -> None:
-        # Generic probe already enumerates in validate()
+        """
+        No-op: generic probe already enumerates in validate().
+        """
         result.setdefault("permissions", [])

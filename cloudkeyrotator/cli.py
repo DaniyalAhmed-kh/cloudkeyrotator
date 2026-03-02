@@ -44,6 +44,17 @@ def cli():
     """CloudKeyRotator — Validate exposed cloud credentials and assess blast radius."""
     pass
 
+def is_valid_credential_format(cred: str) -> bool:
+    # Basic length and character checks for common credential types
+    cred = cred.strip()
+    if not cred:
+        return False
+    if len(cred) < 16:
+        return False
+    if any(c in cred for c in [' ', '\n', '\t']):
+        return False
+    return True
+
 @cli.command("scan")
 @click.argument("credential", required=False)
 @click.option("--file", "-f", "cred_file", type=click.Path(exists=True),
@@ -85,6 +96,11 @@ def scan(credential, cred_file, tenant_id, client_id, output, out_file, no_banne
         console.print("[dim]→ Read from stdin[/dim]")
     else:
         raw = click.prompt("Paste credential", hide_input=True)
+
+    # Input validation
+    if not is_valid_credential_format(raw):
+        console.print("[red]✗ Invalid credential format.[/red]")
+        sys.exit(1)
 
     if not raw:
         console.print("[red]✗ No credential provided.[/red]")
@@ -241,7 +257,11 @@ def revoke_guide(provider):
 
 
 def main():
-    cli()
+    try:
+        cli()
+    except Exception as e:
+        console.print(f"[red]✗ Unexpected error: {e}[/red]")
+        sys.exit(2)
 
 if __name__ == "__main__":
     main()

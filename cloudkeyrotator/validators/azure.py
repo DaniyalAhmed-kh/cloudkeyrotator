@@ -6,6 +6,7 @@ import re
 import json
 from typing import Any, Dict, List
 from urllib.parse import urlparse, parse_qs
+import logging
 
 import requests
 
@@ -15,12 +16,15 @@ AZURE_LOGIN = "https://login.microsoftonline.com"
 GRAPH_API   = "https://graph.microsoft.com/v1.0"
 ARM_API     = "https://management.azure.com"
 
+logger = logging.getLogger("cloudkeyrotator")
+
 
 class AzureValidator(BaseValidator):
-
     def validate(self) -> Dict[str, Any]:
+        """
+        Validate Azure credentials (client secret, storage connection string, SAS token).
+        """
         cred_type = self.meta.get("pattern_name", "")
-
         if "Connection String" in cred_type:
             return self._validate_storage_connection()
         elif "SAS" in cred_type:
@@ -28,8 +32,10 @@ class AzureValidator(BaseValidator):
         else:
             return self._validate_client_secret()
 
-    # ── Client Secret ──────────────────────────────────────────────────────
     def _validate_client_secret(self) -> Dict[str, Any]:
+        """
+        Validate Azure client secret and return result dictionary.
+        """
         result: Dict[str, Any] = {
             "provider":    "Azure",
             "cred_type":   "client_secret",
@@ -65,6 +71,7 @@ class AzureValidator(BaseValidator):
         try:
             resp = requests.post(token_url, data=data, timeout=15)
         except requests.RequestException as e:
+            logger.warning(f"Azure network error: {e}")
             result["error"] = f"Network error: {e}"
             return result
 
@@ -94,8 +101,10 @@ class AzureValidator(BaseValidator):
         }
         return result
 
-    # ── Storage Connection String ──────────────────────────────────────────
     def _validate_storage_connection(self) -> Dict[str, Any]:
+        """
+        Validate Azure storage connection string and return result dictionary.
+        """
         result: Dict[str, Any] = {
             "provider":    "Azure",
             "cred_type":   "storage_connection_string",
@@ -137,6 +146,7 @@ class AzureValidator(BaseValidator):
             }
             result["_blob_client"] = client
         except Exception as e:
+            logger.warning(f"Azure storage connection error: {e}")
             # Fallback: try unauthenticated REST probe to confirm account exists
             url = f"https://{account_name}.blob.{endpoint_suffix}/?comp=list"
             try:
@@ -152,13 +162,15 @@ class AzureValidator(BaseValidator):
                     }
                 else:
                     result["error"] = str(e)
-            except Exception:
+            except Exception as e2:
+                logger.error(f"Azure fallback probe error: {e2}")
                 result["error"] = str(e)
-
         return result
 
-    # ── SAS Token ──────────────────────────────────────────────────────────
     def _validate_sas_token(self) -> Dict[str, Any]:
+        """
+        Validate Azure SAS token and return result dictionary.
+        """
         result: Dict[str, Any] = {
             "provider":    "Azure",
             "cred_type":   "sas_token",
@@ -199,6 +211,9 @@ class AzureValidator(BaseValidator):
         return result
 
     def enumerate(self, result: Dict[str, Any]) -> None:
+        """
+        Enrich result with permissions and blast radius assessment for Azure credentials.
+        """
         token  = result.pop("_token",  None)
         tenant = result.pop("_tenant", None)
         client = result.pop("_client", None)
@@ -214,7 +229,10 @@ class AzureValidator(BaseValidator):
         if cred_type == "storage_connection_string":
             self._enumerate_storage(result, blob_c)
         elif token:
-            self._enumerate_sp(result, token, tenant, client)
+            try:
+                self._enumerate_sp(result, token, tenant, client)
+            except Exception as e:
+                logger.error(f"Azure enumerate_sp error: {e}")
         else:
             result.setdefault("permissions", [])
             result.setdefault("blast_radius", {
